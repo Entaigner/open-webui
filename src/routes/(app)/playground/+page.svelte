@@ -20,6 +20,8 @@
 	import ChatCompletion from '$lib/components/playground/ChatCompletion.svelte';
 	import Selector from '$lib/components/chat/ModelSelector/Selector.svelte';
 
+	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
+
 	const i18n = getContext('i18n');
 
 	let mode = 'chat';
@@ -42,6 +44,76 @@
 			content: ''
 		}
 	];
+
+	// ===>>> Advanced Settings
+	const applyModelOptions = (data) => {
+		if (requestFormat === 'json') {
+			data.response_format = { type: 'json_object' };
+		}
+		for (let key in modelOptions) {
+			if (modelOptions[key]) {
+				data[key] = modelOptions[key];
+			}
+		}
+	};
+
+	const toggleRequestFormat = () => {
+		if (requestFormat === '') {
+			requestFormat = 'json';
+		} else {
+			requestFormat = '';
+		}
+	};
+
+	const resetSettingsToDefault = () => {
+		requestFormat = '';
+
+		modelOptions = { ...optionDefaults };
+		if (modelOptions.seed === 0) {
+			modelOptions.seed = null;
+		}
+
+		console.log('resetSettingsToDefault', requestFormat, modelOptions);
+	};
+
+	const loadGlobalSettings = () => {
+		resetSettingsToDefault();
+
+		let settings = JSON.parse(localStorage.getItem('settings') ?? '{}');
+
+		requestFormat = settings.requestFormat ?? '';
+
+		modelOptions.seed = settings.seed;
+		modelOptions.temperature = settings.temperature ?? '';
+		modelOptions.repeat_penalty = settings.repeat_penalty ?? '';
+		modelOptions.top_k = settings.top_k ?? '';
+		modelOptions.top_p = settings.top_p ?? '';
+		modelOptions.num_ctx = settings.num_ctx ?? '';
+		modelOptions = { ...modelOptions, ...settings.options };
+		modelOptions.stop = (settings?.options?.stop ?? []).join(',');
+	};
+
+	let showAdvanced = false;
+	let requestFormat = '';
+	let optionDefaults = {
+		// Advanced
+		seed: 0,
+		stop: '',
+		temperature: '',
+		repeat_penalty: '',
+		repeat_last_n: '',
+		mirostat: '',
+		mirostat_eta: '',
+		mirostat_tau: '',
+		top_k: '',
+		top_p: '',
+		tfs_z: '',
+		num_ctx: '',
+		num_predict: ''
+	};
+	let modelOptions;
+	resetSettingsToDefault();
+	// <<<=== Advanced Settings
 
 	const scrollToBottom = () => {
 		const element = mode === 'chat' ? messagesContainerElement : textCompletionAreaElement;
@@ -67,18 +139,21 @@
 	const textCompletionHandler = async () => {
 		const model = $models.find((model) => model.id === selectedModelId);
 
+		const data = {
+			model: model.id,
+			stream: true,
+			messages: [
+				{
+					role: 'assistant',
+					content: text
+				}
+			]
+		};
+		applyModelOptions(data);
+
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
-			{
-				model: model.id,
-				stream: true,
-				messages: [
-					{
-						role: 'assistant',
-						content: text
-					}
-				]
-			},
+			data,
 			model.external
 				? model.source === 'litellm'
 					? `${LITELLM_API_BASE_URL}/v1`
@@ -135,21 +210,24 @@
 	const chatCompletionHandler = async () => {
 		const model = $models.find((model) => model.id === selectedModelId);
 
+		const data = {
+			model: model.id,
+			stream: true,
+			messages: [
+				system
+					? {
+							role: 'system',
+							content: system
+					  }
+					: undefined,
+				...messages
+			].filter((message) => message)
+		};
+		applyModelOptions(data);
+
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
-			{
-				model: model.id,
-				stream: true,
-				messages: [
-					system
-						? {
-								role: 'system',
-								content: system
-						  }
-						: undefined,
-					...messages
-				].filter((message) => message)
-			},
+			data,
 			model.external
 				? model.source === 'litellm'
 					? `${LITELLM_API_BASE_URL}/v1`
@@ -400,7 +478,7 @@
 					</div>
 				</div>
 
-				<div class="pb-2">
+				<div class="mb-2 flex justify-between">
 					{#if !loading}
 						<button
 							class="px-3 py-1.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-gray-50 transition rounded-lg"
@@ -420,7 +498,75 @@
 							{$i18n.t('Cancel')}
 						</button>
 					{/if}
+					<button
+						class=" text-xs font-medium text-gray-500"
+						type="button"
+						on:click={() => {
+							showAdvanced = !showAdvanced;
+						}}
+					>
+						{showAdvanced ? $i18n.t('Hide') : $i18n.t('Show')}
+						{$i18n.t('Advanced Parameters')}
+					</button>
 				</div>
+				{#if showAdvanced}
+					<div class="mb-2">
+						<hr class=" dark:border-gray-700 mb-2" />
+						<div class="my-2 text-right">
+							<button
+								type="button"
+								class="px-3 py-1.5 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-900 transition rounded-lg"
+								on:click={() => {
+									loadGlobalSettings();
+								}}
+							>
+								Load Global Settings
+							</button>
+
+							<button
+								type="button"
+								class="px-3 py-1.5 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-900 transition rounded-lg"
+								on:click={() => {
+									resetSettingsToDefault();
+								}}
+							>
+								Reset Settings
+							</button>
+						</div>
+						<div class="my-2">
+							<AdvancedParams bind:options={modelOptions} />
+							<hr class=" dark:border-gray-700 my-2" />
+							<div>
+								<div class=" py-1 flex w-full justify-between">
+									<div class=" self-center text-sm font-medium">{$i18n.t('Request Mode')}</div>
+
+									<button
+										class="p-1 px-3 text-xs flex rounded transition"
+										on:click={() => {
+											toggleRequestFormat();
+										}}
+									>
+										{#if requestFormat === ''}
+											<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
+										{:else if requestFormat === 'json'}
+											<!-- <svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 20 20"
+												fill="currentColor"
+												class="w-4 h-4 self-center"
+											>
+												<path
+													d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.06zM5.404 6.464a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 10-1.061 1.06l1.06 1.06z"
+												/>
+											</svg> -->
+											<span class="ml-2 self-center"> {$i18n.t('JSON')} </span>
+										{/if}
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
